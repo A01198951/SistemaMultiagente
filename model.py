@@ -1,130 +1,7 @@
-from mesa import Agent, Model
+from mesa import Model
 from mesa.space import MultiGrid
 from mesa.time import RandomActivation
-from mesa.visualization.modules import CanvasGrid
-from mesa.visualization.ModularVisualization import ModularServer
-from heapq import heappush, heappop
-from typing import List, Tuple, Dict, Set
-import math
-
-
-class RackAgent(Agent):
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-
-class OutputAgent(Agent):
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-
-class ChargeStationAgent(Agent):
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-
-class InputAgent(Agent):
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-
-class EmptyAgent(Agent):
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-
-class PathFinder:
-    @staticmethod
-    def heuristic(a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        return math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
-    
-    @staticmethod
-    def get_neighbors(pos: Tuple[int, int], grid, height, width) -> List[Tuple[int, int]]:
-        neighbors = []
-        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:  # Remove diagonal movements
-            new_x, new_y = pos[0] + dx, pos[1] + dy
-            if 0 <= new_x < width and 0 <= new_y < height:
-                cell_contents = grid.get_cell_list_contents((new_x, new_y))
-                # Check if cell is empty or contains only EmptyAgent
-                if not cell_contents or all(isinstance(agent, EmptyAgent) for agent in cell_contents):
-                    neighbors.append((new_x, new_y))
-        return neighbors
-
-    @staticmethod
-    def a_star(start: Tuple[int, int], goal: Tuple[int, int], grid, height, width) -> List[Tuple[int, int]]:
-        frontier = []
-        heappush(frontier, (0, start))
-        came_from: Dict[Tuple[int, int], Tuple[int, int]] = {start: None}
-        cost_so_far: Dict[Tuple[int, int], float] = {start: 0}
-
-        while frontier:
-            current = heappop(frontier)[1]
-
-            if current == goal:
-                break
-
-            for next_pos in PathFinder.get_neighbors(current, grid, height, width):
-                new_cost = cost_so_far[current] + 1
-
-                if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
-                    cost_so_far[next_pos] = new_cost
-                    priority = new_cost + PathFinder.heuristic(goal, next_pos)
-                    heappush(frontier, (priority, next_pos))
-                    came_from[next_pos] = current
-
-        # Reconstruct path
-        if goal not in came_from:
-            return []
-
-        path = []
-        current = goal
-        while current is not None:
-            path.append(current)
-            current = came_from[current]
-        path.reverse()
-        return path
-
-class MovableAgent(Agent):
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-        self.path = []
-        self.goal = None
-        self.pathfinder = PathFinder()
-
-    def find_random_empty_cell(self) -> Tuple[int, int]:
-        empty_cells = []
-        for cell in self.model.grid.coord_iter():
-            cell_content, pos = cell
-            if all(isinstance(agent, EmptyAgent) for agent in cell_content):
-                empty_cells.append(pos)
-        return self.random.choice(empty_cells) if empty_cells else None
-
-    def step(self):
-        # If we don't have a goal or reached it, find a new one
-        if not self.goal or self.pos == self.goal:
-            self.goal = self.find_random_empty_cell()
-            if self.goal:
-                self.path = self.pathfinder.a_star(
-                    self.pos,
-                    self.goal,
-                    self.model.grid,
-                    self.model.grid.height,
-                    self.model.grid.width
-                )
-
-        # If we have a path, move along it
-        if self.path and len(self.path) > 1:
-            next_pos = self.path[1]
-            cell_contents = self.model.grid.get_cell_list_contents(next_pos)
-            
-            # Only move if the next cell is empty or contains only EmptyAgent
-            if not cell_contents or all(isinstance(agent, EmptyAgent) for agent in cell_contents):
-                self.model.grid.move_agent(self, next_pos)
-                self.path = self.path[1:]
-            else:
-                # Recalculate path if blocked
-                self.path = self.pathfinder.a_star(
-                    self.pos,
-                    self.goal,
-                    self.model.grid,
-                    self.model.grid.height,
-                    self.model.grid.width
-                )
+from .agent import RackAgent, OutputAgent, ChargeStationAgent, InputAgent, MovableAgent, EmptyAgent
 
 class WarehouseModel(Model):
     def __init__(self, layout=None):
@@ -164,9 +41,9 @@ class WarehouseModel(Model):
     DEFAULT_LAYOUT = [
     'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 1
     'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 1   
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEOEOEOEEEEEE' , # 1
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEOEOEOEEEEEE' , # 2
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEOEOEOEEEEEE' , # 3
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 1
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 2
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 3
     'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' , # 4
     'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' , # 5
     'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' , # 6
@@ -245,79 +122,11 @@ class WarehouseModel(Model):
     'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 79
     'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 80
     'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 81
-    'IIIIIIIIIEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 82
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 82
     'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR',# 83
     'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', # 84
     'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', # 85
     'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', # 86
-    'EEEEEEEEEEEECECEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', #87
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', #87
     'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' #88
     ]
-
-def agent_portrayal(agent):
-    if isinstance(agent, RackAgent):
-        return {
-            "Shape": "rect",
-            "Color": "gray",
-            "Filled": True,
-            "Layer": 0,
-            "w": 1,
-            "h": 1
-        }
-    elif isinstance(agent, OutputAgent):
-        return {
-            "Shape": "rect",
-            "Color": "black",
-            "Filled": True,
-            "Layer": 0,
-            "w": 0.8,
-            "h": 0.8
-        }
-    elif isinstance(agent, ChargeStationAgent):
-        return {
-            "Shape": "rect",
-            "Color": "green",
-            "Filled": True,
-            "Layer": 0,
-            "w": 0.8,
-            "h": 0.8
-        }
-    elif isinstance(agent, InputAgent):
-        return {
-            "Shape": "rect",
-            "Color": "yellow",
-            "Filled": True,
-            "Layer": 0,
-            "w": 0.8,
-            "h": 0.8
-        }
-    elif isinstance(agent, MovableAgent):
-        return {
-            "Shape": "rect",
-            "Color": "red",
-            "Filled": True,
-            "Layer": 1,
-            "w": 0.8,
-            "h": 0.8
-        }
-    elif isinstance(agent, EmptyAgent):
-        return {
-            "Shape": "rect",
-            "Color": "white",
-            "Filled": True,
-            "Layer": 0,
-            "w": 1,
-            "h": 1
-        }
-    return {}
-
-# Create visualization
-grid = CanvasGrid(agent_portrayal, 113, 90, 904, 720)
-server = ModularServer(WarehouseModel,
-                      [grid],
-                      "Warehouse Layout",
-                      {"layout": None})
-
-if __name__ == '__main__':
-    server.port = 8521
-    server.launch()
