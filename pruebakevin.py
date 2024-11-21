@@ -66,7 +66,7 @@ class TaskManager:
         output_positions = self.model.OUTPUT_POSITIONS
         rack_positions = self.model.RACK_POSITIONS
 
-        total_tasks = 5
+        total_tasks = 4
         tasks_set = set()  # Use set to prevent duplicates
 
         for i in range(total_tasks):
@@ -78,7 +78,7 @@ class TaskManager:
                 source_pos = random.choice(rack_positions)
                 dest_pos = random.choice(output_positions)
                 task = Task(TaskType.RETRIEVE, source_pos, dest_pos)
-                
+
             if task not in tasks_set:  # Only add if not duplicate
                 tasks_set.add(task)
                 self.pending_tasks.append(task)
@@ -291,7 +291,7 @@ class ForkliftAgent(MovableAgent):
         print(f"Current Task: {self.current_task.task_type if self.current_task else 'None'}")
         print(f"Task State: {self.task_state}")
 
-        self.battery_level -= 2
+        self.battery_level -= 0.5
 
         if not self.path:
             print(f"Forklift {self.unique_id} is stuck or has no path. Penalizing.")
