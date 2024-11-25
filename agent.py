@@ -9,6 +9,7 @@ import math
 import random
 from enum import Enum
 from typing import Tuple, Optional
+import json
 
 class TaskType(Enum):
     STORE = "STORE"         
@@ -281,6 +282,8 @@ class MovableAgent(Agent):
                 )
 
 class ForkliftAgent(MovableAgent):
+    all_movement_sequences = {}
+
     def __init__(self, unique_id, model, starting_position):
         super().__init__(unique_id, model)
         self.carrying_pallet = False
@@ -290,6 +293,7 @@ class ForkliftAgent(MovableAgent):
         self.starting_position = starting_position  
         self.battery_level = 100 
         self.reward = 0  
+        self.movement_sequence = []
 
     def step(self):
         print(f"\n=== Forklift {self.unique_id} Status ===")
@@ -299,6 +303,13 @@ class ForkliftAgent(MovableAgent):
         print(f"Reward: {self.reward}")
         print(f"Current Task: {self.current_task.task_type if self.current_task else 'None'}")
         print(f"Task State: {self.task_state}")
+
+        if self.pos:
+            self.movement_sequence.append({
+                "x": self.pos[0],
+                "y": self.pos[1]
+            })
+            self.save_path_to_json()
 
         self.battery_level -= 0
 
@@ -427,6 +438,44 @@ class ForkliftAgent(MovableAgent):
                     self.current_task = None
                     self.path = None
 
+    def save_path_to_json(self):
+        """Save movement sequence to JSON"""
+        filename = f'forklift_paths.json'
+        
+        # Try to load existing data
+        try:
+            with open(filename, 'r') as f:
+                data = json.load(f)
+                if not isinstance(data, list):
+                    data = []
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = []
+
+        # Convert movement sequence to array of position pairs
+        positions = [[pos['x'], pos['y']] for pos in self.movement_sequence]
+        
+        # Find if agent already exists in data
+        agent_found = False
+        for agent in data:
+            if agent['id'] == self.unique_id:
+                agent['positions'] = positions
+                agent_found = True
+                break
+        
+        # Add new agent if not found
+        if not agent_found:
+            data.append({
+                'id': self.unique_id,
+                'positions': positions
+            })
+
+        # Sort by ID
+        data.sort(key=lambda x: x['id'])
+
+        # Save with compact formatting
+        with open(filename, 'w') as f:
+            json.dump(data, f, separators=(',', ':'))
+
     def _handle_loading(self):
         print(f"Forklift {self.unique_id} attempting to load at {self.pos}")
         cell_contents = self.model.grid.get_cell_list_contents(self.pos)
@@ -472,7 +521,7 @@ class ForkliftAgent(MovableAgent):
         print(f"Forklift {self.unique_id} failed to unload at {self.pos}")
         self.reward -= 10  
         return False
-
+    
 class WarehouseModel(Model):
     SYMBOL_AGENT_MAPPING = {
         'E': EmptyAgent,
@@ -569,6 +618,10 @@ class WarehouseModel(Model):
             not forklift.carrying_pallet
             for forklift in self.forklift_agents
         )
+
+        if not self.running:
+            for forklift in self.forklift_agents:
+                forklift.save_path_to_json()
 
         if all_tasks_complete and all_forklifts_idle:
             print("\n=== All tasks completed. Simulation finished ===")
