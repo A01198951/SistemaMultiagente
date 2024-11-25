@@ -6,11 +6,162 @@ from mesa.visualization.ModularVisualization import ModularServer
 from heapq import heappush, heappop
 from typing import List, Tuple, Dict, Set
 import math
+import random
+from enum import Enum
+from typing import Tuple, Optional
 
+class TaskType(Enum):
+    STORE = "STORE"         
+    RETRIEVE = "RETRIEVE"   
+
+class Task:
+    def __init__(self, task_type: TaskType, source_pos: Tuple[int, int], 
+                 dest_pos: Tuple[int, int], pallet_id: Optional[int] = None):
+        self.task_type = task_type
+        self.source_pos = source_pos
+        self.dest_pos = dest_pos
+        self.pallet_id = pallet_id
+        self.assigned_forklift = None
+        self.completed = False
+        self.assigned_time = None  
+        self.completed_time = None  
+
+    def __eq__(self, other):
+        if not isinstance(other, Task):
+            return False
+        return (self.task_type == other.task_type and 
+                self.source_pos == other.source_pos and 
+                self.dest_pos == other.dest_pos)
+
+    def __hash__(self):
+        return hash((self.task_type, self.source_pos, self.dest_pos))    
+
+    def __str__(self):
+        return f"Task({self.task_type}, from={self.source_pos}, to={self.dest_pos})"
+    
+class TaskManager:
+    def __init__(self, model):
+        self.model = model
+        self.pending_tasks = []
+        self.active_tasks = []
+        self.generate_initial_tasks()  
+
+    def dRBug_print_status(self):
+        print("\n=== Task Manager Status ===")
+        print(f"Pending tasks: {len(self.pending_tasks)}")
+        for task in self.pending_tasks:
+            print(f"- {task}")
+        print(f"Active tasks: {len(self.active_tasks)}")
+        for task in self.active_tasks:
+            print(f"- {task}")
+    
+    def assign_charge_task(self, forklift):
+        charge_station_positions = [agent.pos for agent in self.model.charge_stations]
+        nearest_station = min(
+            charge_station_positions,
+            key=lambda pos: abs(forklift.pos[0] - pos[0]) + abs(forklift.pos[1] - pos[1])
+        )
+        charge_task = Task(TaskType.STORE, forklift.pos, nearest_station)
+        return charge_task
+
+
+    def generate_initial_tasks(self):
+        input_positions = [agent.pos for agent in self.model.input_agents]
+        output_positions = [agent.pos for agent in self.model.output_agents]
+
+        racks_with_pallets = [agent.pos for agent in self.model.rack_agents if agent.has_pallet]
+        empty_racks = [agent.pos for agent in self.model.rack_agents if not agent.has_pallet]
+
+        total_tasks = 4
+        tasks_set = set()
+
+        for i in range(total_tasks):
+            if i % 2 == 0:  
+                if not empty_racks:
+                    print("No hay racks vacíos disponibles para tareas de almacenamiento.")
+                    continue
+                source_pos = random.choice(input_positions)
+                dest_pos = random.choice(empty_racks)
+                task = Task(TaskType.STORE, source_pos, dest_pos)
+                empty_racks.remove(dest_pos)  
+            else:  
+                if not racks_with_pallets:
+                    print("No hay racks con pallets disponibles para tareas de recuperación.")
+                    continue
+                source_pos = random.choice(racks_with_pallets)
+                dest_pos = random.choice(output_positions)
+                task = Task(TaskType.RETRIEVE, source_pos, dest_pos)
+                racks_with_pallets.remove(source_pos)
+
+            if task not in tasks_set:
+                tasks_set.add(task)
+                self.pending_tasks.append(task)
+
+
+    def assign_task(self, forklift):
+        if not self.pending_tasks and not self.active_tasks:
+            return None
+
+        if forklift.pos == forklift.starting_position:
+            viable_task = None
+            for task in self.pending_tasks:
+                if task.task_type == TaskType.RETRIEVE:
+                    rack_agent = self.model.get_agent_at_position(task.source_pos)
+                    if isinstance(rack_agent, RackAgent) and rack_agent.has_pallet:
+                        viable_task = task
+                        break
+                elif task.task_type == TaskType.STORE:
+                    rack_agent = self.model.get_agent_at_position(task.dest_pos)
+                    if isinstance(rack_agent, RackAgent) and not rack_agent.has_pallet:
+                        viable_task = task
+                        break
+
+            if viable_task:
+                self.pending_tasks.remove(viable_task)
+                viable_task.assigned_forklift = forklift
+                viable_task.assigned_time = self.model.schedule.time
+                self.active_tasks.append(viable_task)
+                return viable_task
+            else:
+                print("No hay tareas viables disponibles para asignar.")
+                return None
+        return None
+
+    def complete_task(self, task):
+        if task in self.active_tasks:
+            self.active_tasks.remove(task)
+            task.completed = True
+            task.completed_time = self.model.schedule.time  
+            self.model.completed_tasks.append(task)  
+            print(f"Task {task} marked as completed.")
+
+class BlockAgent(Agent):
+    def __init__(self, unique_id, model):
+        super().__init__(unique_id, model)
 
 class RackAgent(Agent):
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
+        self.has_pallet = random.choice([True, False])
+        self.pallet_id = self.unique_id if self.has_pallet else None
+
+    def store_pallet(self, pallet_id=None):
+        if not self.has_pallet:
+            self.has_pallet = True
+            self.pallet_id = pallet_id
+            return True
+        return False
+
+    def remove_pallet(self):
+        if self.has_pallet:
+            pallet_id = self.pallet_id
+            self.has_pallet = False  
+            self.pallet_id = None
+            return pallet_id
+        return None
+
+    def is_available(self):
+        return not self.has_pallet
 
 class OutputAgent(Agent):
     def __init__(self, unique_id, model):
@@ -31,54 +182,61 @@ class EmptyAgent(Agent):
 class PathFinder:
     @staticmethod
     def heuristic(a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        return math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
-    
+        return abs(b[0] - a[0]) + abs(b[1] - a[1])
+
+    @staticmethod
+    def is_valid_position(pos: Tuple[int, int], grid, height, width) -> bool:
+        if not (0 <= pos[0] < width and 0 <= pos[1] < height):
+            return False
+
+        cell_contents = grid.get_cell_list_contents(pos)
+        for agent in cell_contents:
+            if isinstance(agent, (ForkliftAgent, BlockAgent)):
+                return False  
+
+        return True  
+
     @staticmethod
     def get_neighbors(pos: Tuple[int, int], grid, height, width) -> List[Tuple[int, int]]:
         neighbors = []
-        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:  # Remove diagonal movements
-            new_x, new_y = pos[0] + dx, pos[1] + dy
-            if 0 <= new_x < width and 0 <= new_y < height:
-                cell_contents = grid.get_cell_list_contents((new_x, new_y))
-                # Check if cell is empty or contains only EmptyAgent
-                if not cell_contents or all(isinstance(agent, EmptyAgent) for agent in cell_contents):
-                    neighbors.append((new_x, new_y))
+        movements = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+                    
+        for dx, dy in movements:
+            new_pos = (pos[0] + dx, pos[1] + dy)
+            if PathFinder.is_valid_position(new_pos, grid, height, width):
+                neighbors.append(new_pos)
         return neighbors
 
     @staticmethod
     def a_star(start: Tuple[int, int], goal: Tuple[int, int], grid, height, width) -> List[Tuple[int, int]]:
+        
         frontier = []
         heappush(frontier, (0, start))
-        came_from: Dict[Tuple[int, int], Tuple[int, int]] = {start: None}
-        cost_so_far: Dict[Tuple[int, int], float] = {start: 0}
-
+        came_from = {start: None}
+        cost_so_far = {start: 0}
+        
         while frontier:
             current = heappop(frontier)[1]
-
+            
             if current == goal:
-                break
+                path = []
+                while current is not None:
+                    path.append(current)
+                    current = came_from[current]
+                path.reverse()
+                return path
 
             for next_pos in PathFinder.get_neighbors(current, grid, height, width):
                 new_cost = cost_so_far[current] + 1
-
+                
                 if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
                     cost_so_far[next_pos] = new_cost
-                    priority = new_cost + PathFinder.heuristic(goal, next_pos)
+                    priority = new_cost + PathFinder.heuristic(next_pos, goal)
                     heappush(frontier, (priority, next_pos))
                     came_from[next_pos] = current
 
-        # Reconstruct path
-        if goal not in came_from:
-            return []
-
-        path = []
-        current = goal
-        while current is not None:
-            path.append(current)
-            current = came_from[current]
-        path.reverse()
-        return path
-
+        return []  
+    
 class MovableAgent(Agent):
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
@@ -95,7 +253,6 @@ class MovableAgent(Agent):
         return self.random.choice(empty_cells) if empty_cells else None
 
     def step(self):
-        # If we don't have a goal or reached it, find a new one
         if not self.goal or self.pos == self.goal:
             self.goal = self.find_random_empty_cell()
             if self.goal:
@@ -107,17 +264,14 @@ class MovableAgent(Agent):
                     self.model.grid.width
                 )
 
-        # If we have a path, move along it
         if self.path and len(self.path) > 1:
             next_pos = self.path[1]
             cell_contents = self.model.grid.get_cell_list_contents(next_pos)
-            
-            # Only move if the next cell is empty or contains only EmptyAgent
-            if not cell_contents or all(isinstance(agent, EmptyAgent) for agent in cell_contents):
+
+            if not cell_contents or all(isinstance(agent, (EmptyAgent, RackAgent, InputAgent, OutputAgent, ChargeStationAgent)) for agent in cell_contents):
                 self.model.grid.move_agent(self, next_pos)
                 self.path = self.path[1:]
             else:
-                # Recalculate path if blocked
                 self.path = self.pathfinder.a_star(
                     self.pos,
                     self.goal,
@@ -126,139 +280,320 @@ class MovableAgent(Agent):
                     self.model.grid.width
                 )
 
-class WarehouseModel(Model):
-    def __init__(self, layout=None):
-        if layout is None:
-            layout = self.DEFAULT_LAYOUT
-            
-        height = len(layout)
-        width = len(layout[0])
-        
-        self.grid = MultiGrid(width, height, True)
-        self.schedule = RandomActivation(self)
-        
-        # Create agents based on layout
-        for y, row in enumerate(layout):
-            for x, cell in enumerate(row):
-                agent = None
-                if cell == 'R':
-                    agent = RackAgent(f"rack_{x}_{y}", self)
-                elif cell == 'O':
-                    agent = OutputAgent(f"output_{x}_{y}", self)
-                elif cell == 'C':
-                    agent = ChargeStationAgent(f"charge_{x}_{y}", self)
-                elif cell == 'I':
-                    agent = InputAgent(f"input_{x}_{y}", self)
-                elif cell == 'A':
-                    agent = MovableAgent(f"movable_{x}_{y}", self)
-                elif cell == ' ' or cell == 'E':
-                    agent = EmptyAgent(f"empty_{x}_{y}", self)
-                
-                if agent:
-                    self.grid.place_agent(agent, (x, height-y-1))
-                    self.schedule.add(agent)
+class ForkliftAgent(MovableAgent):
+    def __init__(self, unique_id, model, starting_position):
+        super().__init__(unique_id, model)
+        self.carrying_pallet = False
+        self.current_task = None
+        self.current_pallet_id = None
+        self.task_state = "IDLE" 
+        self.starting_position = starting_position  
+        self.battery_level = 100 
+        self.reward = 0  
 
     def step(self):
+        print(f"\n=== Forklift {self.unique_id} Status ===")
+        print(f"Position: {self.pos}")
+        print(f"Carrying Pallet: {self.carrying_pallet}")
+        print(f"Battery Level: {self.battery_level}%")
+        print(f"Reward: {self.reward}")
+        print(f"Current Task: {self.current_task.task_type if self.current_task else 'None'}")
+        print(f"Task State: {self.task_state}")
+
+        self.battery_level -= 0
+
+        if not self.path and self.pos != self.goal:
+            print(f"Forklift {self.unique_id} is stuck or has no path. Penalizing.")
+            self.reward -= 10
+
+        needs_urgent_charging = self.battery_level < 20
+        if needs_urgent_charging:
+            print(f"¡Batería crítica ({self.battery_level}%)! Forzando carga...")
+        
+        if (self.battery_level < 50 and self.task_state == "IDLE") or needs_urgent_charging:
+            self.current_task = self.model.task_manager.assign_charge_task(self)
+            if self.current_task:
+                self.task_state = "CHARGING"
+                self.goal = self.current_task.dest_pos
+                self.path = self.pathfinder.a_star(
+                    self.pos,
+                    self.goal,
+                    self.model.grid,
+                    self.model.grid.height,
+                    self.model.grid.width
+                )
+
+        if self.task_state == "CHARGING":
+            if self.pos == self.current_task.dest_pos:
+                print(f"Forklift {self.unique_id} reached charging station at {self.pos}")
+                self.battery_level = 100 
+                self.reward += 20  
+                self.task_state = "RETURNING_HOME"
+                self.current_task = None
+
+        if self.task_state == "IDLE":
+            self.current_task = self.model.task_manager.assign_task(self)
+            if self.current_task:
+                print(f"Got new task: {self.current_task}")
+                self.task_state = "MOVING_TO_SOURCE"
+                self.goal = self.current_task.source_pos
+                self.path = self.pathfinder.a_star(
+                    self.pos,
+                    self.goal,
+                    self.model.grid,
+                    self.model.grid.height,
+                    self.model.grid.width
+                )
+            else:
+                print("No tasks available - staying idle")
+                return
+
+        if self.task_state == "RETURNING_HOME":
+            if self.pos == self.starting_position:
+                print(f"Forklift {self.unique_id} returned to starting position {self.starting_position}")
+                self.task_state = "IDLE"
+                self.goal = None
+                self.reward += 10  
+            else:
+                self.goal = self.starting_position
+                self.path = self.pathfinder.a_star(
+                    self.pos,
+                    self.goal,
+                    self.model.grid,
+                    self.model.grid.height,
+                    self.model.grid.width
+                )
+
+        if self.current_task or self.task_state == "RETURNING_HOME" or self.task_state == "CHARGING":
+            self._execute_current_task()
+            if self.path:  
+                super().step()
+
+    def _execute_current_task(self):
+        if not self.current_task and self.task_state not in ["RETURNING_HOME", "CHARGING"]:
+            print(f"Forklift {self.unique_id} has no current task to execute.")
+            return
+
+        if not self.path:
+            if self.task_state == "MOVING_TO_SOURCE":
+                self.goal = self.current_task.source_pos
+            elif self.task_state == "MOVING_TO_DEST":
+                self.goal = self.current_task.dest_pos
+            elif self.task_state == "RETURNING_HOME":
+                self.goal = self.starting_position
+            elif self.task_state == "CHARGING":
+                self.goal = self.current_task.dest_pos
+
+            self.path = self.pathfinder.a_star(
+                self.pos,
+                self.goal,
+                self.model.grid,
+                self.model.grid.height,
+                self.model.grid.width
+            )
+            print(f"Forklift {self.unique_id} recalculated path: {self.path}")
+
+        if self.path:
+            if self.pos == self.goal:
+                if self.task_state == "MOVING_TO_SOURCE":
+                    print(f"Forklift {self.unique_id} reached source position {self.current_task.source_pos}")
+                    success = self._handle_loading()
+                    if success:
+                        self.task_state = "MOVING_TO_DEST"
+                        self.goal = self.current_task.dest_pos
+                        self.path = None  
+
+                elif self.task_state == "MOVING_TO_DEST":
+                    print(f"Forklift {self.unique_id} reached destination position {self.current_task.dest_pos}")
+                    success = self._handle_unloading()
+                    if success:
+                        print(f"Forklift {self.unique_id} completed task and is returning home.")
+                        self.task_state = "RETURNING_HOME"
+                        self.model.task_manager.complete_task(self.current_task)
+                        self.current_task = None
+                        self.path = None  
+
+                elif self.task_state == "RETURNING_HOME":
+                    print(f"Forklift {self.unique_id} returned to starting position {self.starting_position}")
+                    self.task_state = "IDLE"
+                    self.goal = None
+                    self.reward += 10  
+
+                elif self.task_state == "CHARGING":
+                    print(f"Forklift {self.unique_id} reached charging station at {self.pos}")
+                    self.battery_level = 100 
+                    self.reward += 20  
+                    self.task_state = "RETURNING_HOME"
+                    self.current_task = None
+                    self.path = None
+
+    def _handle_loading(self):
+        print(f"Forklift {self.unique_id} attempting to load at {self.pos}")
+        cell_contents = self.model.grid.get_cell_list_contents(self.pos)
+        for agent in cell_contents:
+            if self.current_task.task_type == TaskType.STORE and isinstance(agent, InputAgent):
+                self.carrying_pallet = True
+                print(f"Forklift {self.unique_id} picked up a pallet from InputAgent at {self.pos}")
+                self.reward += 15  
+                return True
+            elif self.current_task.task_type == TaskType.RETRIEVE and isinstance(agent, RackAgent):
+                if agent.has_pallet:
+                    pallet_id = agent.remove_pallet()
+                    if pallet_id:
+                        self.current_pallet_id = pallet_id
+                        self.carrying_pallet = True
+                        print(f"Forklift {self.unique_id} picked up pallet {pallet_id} from RackAgent at {self.pos}")
+                        self.reward += 15 
+                        return True
+
+        print(f"Forklift {self.unique_id} failed to load at {self.pos}")
+        self.reward -= 5  
+        return False
+
+    def _handle_unloading(self):
+        print(f"Forklift {self.unique_id} attempting to unload at {self.pos}")
+        cell_contents = self.model.grid.get_cell_list_contents(self.pos)
+        for agent in cell_contents:
+            if self.current_task.task_type == TaskType.STORE and isinstance(agent, RackAgent):
+                if not agent.has_pallet:
+                    if agent.store_pallet(self.current_pallet_id):
+                        print(f"Forklift {self.unique_id} stored pallet {self.current_pallet_id} in RackAgent at {self.pos}")
+                        self.current_pallet_id = None
+                        self.carrying_pallet = False
+                        self.reward += 20  
+                        return True
+            elif self.current_task.task_type == TaskType.RETRIEVE and isinstance(agent, OutputAgent):
+                print(f"Forklift {self.unique_id} delivered pallet {self.current_pallet_id} to OutputAgent at {self.pos}")
+                self.current_pallet_id = None
+                self.carrying_pallet = False
+                self.reward += 20  
+                return True
+
+        print(f"Forklift {self.unique_id} failed to unload at {self.pos}")
+        self.reward -= 10  
+        return False
+
+class WarehouseModel(Model):
+    SYMBOL_AGENT_MAPPING = {
+        'E': EmptyAgent,
+        'B': BlockAgent,
+        'R': RackAgent,
+        'I': InputAgent,
+        'O': OutputAgent,
+        'C': ChargeStationAgent,
+        'A': ForkliftAgent
+    }
+    
+    def __init__(self, layout=None):
+        super().__init__()
+        if layout is None:
+            layout = self.DEFAULT_LAYOUT
+
+        self.completed_tasks = []
+        height = len(layout)
+        width = len(layout[0])
+
+        self.grid = MultiGrid(width, height, False)
+        self.schedule = RandomActivation(self)
+
+        self.input_agents = []
+        self.output_agents = []
+        self.rack_agents = []
+        self.forklift_agents = []
+        self.charge_stations = []
+
+        forklift_id_counter = 1  
+
+        for y in range(height):
+            row = layout[y]
+            for x in range(width):
+                char = row[x]
+                pos = (x, height - y - 1)
+                agent_class = self.SYMBOL_AGENT_MAPPING.get(char, EmptyAgent)
+
+                if agent_class == ForkliftAgent:
+                    agent_id = forklift_id_counter 
+                    forklift_id_counter += 1       
+                    agent = agent_class(agent_id, self, starting_position=pos)
+                    self.forklift_agents.append(agent)
+                else:
+                    agent_id = f"{agent_class.__name__}_{x}_{y}"
+                    agent = agent_class(agent_id, self)
+                    if agent_class == RackAgent:
+                        self.rack_agents.append(agent)
+                    elif agent_class == InputAgent:
+                        self.input_agents.append(agent)
+                    elif agent_class == OutputAgent:
+                        self.output_agents.append(agent)
+                    elif agent_class == ChargeStationAgent:
+                        self.charge_stations.append(agent)
+
+                self.grid.place_agent(agent, pos)
+                self.schedule.add(agent)
+
+        self.task_manager = TaskManager(self)
+
+    def get_agent_at_position(self, pos):
+        cell_contents = self.grid.get_cell_list_contents(pos)
+        for agent in cell_contents:
+            if isinstance(agent, RackAgent):
+                return agent
+        return None
+
+    def write_data_to_file(self):
+        with open('Informacion.txt', 'w') as f:
+            f.write("Datos de la Simulacion\n")
+            f.write("======================\n\n")
+            total_tasks = len(self.completed_tasks)
+            f.write(f"Total de tareas completadas: {total_tasks}\n")
+            f.write(f"Total de pallets movidos: {total_tasks}\n\n")
+
+            f.write("Detalles de las tareas:\n")
+            for task in self.completed_tasks:
+                f.write(f"- Tipo de tarea: {task.task_type.value}\n")
+                f.write(f"  Posicion de origen: {task.source_pos}\n")
+                f.write(f"  Posicion de destino: {task.dest_pos}\n")
+                f.write(f"  LGV asignado: {task.assigned_forklift.unique_id}\n")
+                f.write(f"  Tiempo completado: {task.completed_time}\n\n")
+
+    def step(self):
+        print("\n=== Warehouse Step ===")
+        self.task_manager.dRBug_print_status()
+
+        all_tasks_complete = (
+            len(self.task_manager.pending_tasks) == 0 and 
+            len(self.task_manager.active_tasks) == 0
+        )
+        all_forklifts_idle = all(
+            forklift.task_state == "IDLE" and 
+            not forklift.carrying_pallet
+            for forklift in self.forklift_agents
+        )
+
+        if all_tasks_complete and all_forklifts_idle:
+            print("\n=== All tasks completed. Simulation finished ===")
+            self.write_data_to_file()
+            self.running = False
+            return
+    
         self.schedule.step()
 
-    DEFAULT_LAYOUT = [
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 1
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 1   
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEOEOEOEEEEEE' , # 1
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEOEOEOEEEEEE' , # 2
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEOEOEOEEEEEE' , # 3
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' , # 4
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' , # 5
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' , # 6
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' , # 7
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' , # 8
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' , # 9
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' , # 10
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 11
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 12
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 13
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 14
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 15
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 16
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 17
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 18
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 19
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 20
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 21
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 22
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 23
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 24
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 25
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 26
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 27
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 28
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 29
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 30
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 31
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERR' ,  # 32
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERR' ,  # 33
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERR' ,  # 34
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERR' ,  # 35
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 36
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 37
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 38
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 39
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 40
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 41
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 42
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 43
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 44
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 45
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 46
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 47
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 48
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 49
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 50
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 51
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 52
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 53
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 54
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 55
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 56
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 57
-    'EEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 58
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERR' ,  # 59
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERR' ,  # 60
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERR' ,  # 61
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERR' ,  # 62
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 63
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 64
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 65
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 66
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 67
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 68
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 69
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 70
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 71
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 72
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 73
-    'EEEEEEEEEEEEAEEAEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 74
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 75
-    'EEEEEEEEEEEEAEEAEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 76
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 77
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 78
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 79
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 80
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 81
-    'IIIIIIIIIEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR' ,  # 82
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERRRREEERR',# 83
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', # 84
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', # 85
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', # 86
-    'EEEEEEEEEEEECECEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', #87
-    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' #88
-    ]
-
 def agent_portrayal(agent):
-    if isinstance(agent, RackAgent):
+    if isinstance(agent, BlockAgent):
+        portrayal = {
+            "Shape": "rect",
+            "Filled": "true",
+            "Layer": 0,
+            "Color": "black",
+            "w": 1,
+            "h": 1
+        }
+        return portrayal
+    elif isinstance(agent, RackAgent):
+        color = "brown" if agent.has_pallet else "gray"
         return {
             "Shape": "rect",
-            "Color": "gray",
+            "Color": color,
             "Filled": True,
             "Layer": 0,
             "w": 1,
@@ -275,12 +610,11 @@ def agent_portrayal(agent):
         }
     elif isinstance(agent, ChargeStationAgent):
         return {
-            "Shape": "rect",
+            "Shape": "circle",
             "Color": "green",
             "Filled": True,
             "Layer": 0,
-            "w": 0.8,
-            "h": 0.8
+            "r": 0.5
         }
     elif isinstance(agent, InputAgent):
         return {
@@ -291,7 +625,7 @@ def agent_portrayal(agent):
             "w": 0.8,
             "h": 0.8
         }
-    elif isinstance(agent, MovableAgent):
+    elif isinstance(agent, ForkliftAgent):
         return {
             "Shape": "rect",
             "Color": "red",
@@ -311,12 +645,106 @@ def agent_portrayal(agent):
         }
     return {}
 
-# Create visualization
-grid = CanvasGrid(agent_portrayal, 113, 90, 904, 720)
-server = ModularServer(WarehouseModel,
-                      [grid],
-                      "Warehouse Layout",
-                      {"layout": None})
+layout = [
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 1
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 1   
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEOEEEEEEEEEEEE' , # 1
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 2
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' , # 3
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' , # 4
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' , # 5
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' , # 6
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' , # 7
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' , # 8
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' , # 9
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' , # 10
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 11
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 12
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 13
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 14
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 15
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 16
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBREEEEEEEEEEEEEEEEEEEEEEEEE' ,  # 17
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 18
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 19
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 20
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 21
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 22
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 23
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 24
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 25
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 26
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 27
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 28
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 29
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 30
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 31
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERBB' ,  # 32
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERBB' ,  # 33
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERBB' ,  # 34
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERBB' ,  # 35
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 36
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 37
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 38
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 39
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 40
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 41
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 42
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 43
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 44
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 45
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 46
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 47
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 48
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 49
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 50
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 51
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 52
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 53
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 54
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 55
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 56
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 57
+    'EEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 58
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERBB' ,  # 59
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERBB' ,  # 60
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERBB' ,  # 61
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERBB' ,  # 62
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 63
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 64
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 65
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 66
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 67
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 68
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 69
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 70
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 71
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 72
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 73
+    'EEEEEEEEEEEEAEEAEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 74
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 75
+    'EEEEEEEEEEEEAEEAEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 76
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 77
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 78
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 79
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 80
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 81
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 82
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB',# 83
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', # 84
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', # 85
+    'EEIEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', # 86
+    'EEEEEEEEEEEEEEEEEECCEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', #87
+    'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' #88
+    ]
+
+grid = CanvasGrid(agent_portrayal, len(layout[0]), len(layout), 1130, 900)
+server = ModularServer(
+    WarehouseModel,
+    [grid],
+    "Warehouse Layout",
+    {"layout": layout}
+)
 
 if __name__ == '__main__':
     server.port = 8521
