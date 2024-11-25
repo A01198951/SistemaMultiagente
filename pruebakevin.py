@@ -54,45 +54,72 @@ class TaskManager:
             print(f"- {task}")
     
     def assign_charge_task(self, forklift):
-            nearest_station = min(
-                self.model.CHARGE_STATIONS,
-                key=lambda pos: abs(forklift.pos[0] - pos[0]) + abs(forklift.pos[1] - pos[1])
-            )
-            charge_task = Task(TaskType.STORE, forklift.pos, nearest_station)
-            return charge_task
+        nearest_station = min(
+            self.model.CHARGE_STATIONS,
+            key=lambda pos: abs(forklift.pos[0] - pos[0]) + abs(forklift.pos[1] - pos[1])
+        )
+        charge_task = Task(TaskType.STORE, forklift.pos, nearest_station)
+        return charge_task
 
     def generate_initial_tasks(self):
         input_positions = self.model.INPUT_POSITIONS
         output_positions = self.model.OUTPUT_POSITIONS
-        rack_positions = self.model.RACK_POSITIONS
+        
+        # Obtener racks disponibles según su estado
+        racks_with_pallets = [agent.pos for agent in self.model.rack_agents if agent.has_pallet]
+        empty_racks = [agent.pos for agent in self.model.rack_agents if not agent.has_pallet]
 
-        total_tasks = 4
-        tasks_set = set()  # Use set to prevent duplicates
+        total_tasks = 15
+        tasks_set = set()
 
         for i in range(total_tasks):
             if i % 2 == 0:  # STORE task
+                if not empty_racks:
+                    print("No hay racks vacíos disponibles para tareas de almacenamiento.")
+                    continue
                 source_pos = random.choice(input_positions)
-                dest_pos = random.choice(rack_positions)
+                dest_pos = random.choice(empty_racks)
                 task = Task(TaskType.STORE, source_pos, dest_pos)
+                empty_racks.remove(dest_pos)  # Evitar usar el mismo rack varias veces
             else:  # RETRIEVE task
-                source_pos = random.choice(rack_positions)
+                if not racks_with_pallets:
+                    print("No hay racks con pallets disponibles para tareas de recuperación.")
+                    continue
+                source_pos = random.choice(racks_with_pallets)
                 dest_pos = random.choice(output_positions)
                 task = Task(TaskType.RETRIEVE, source_pos, dest_pos)
+                racks_with_pallets.remove(source_pos)
 
-            if task not in tasks_set:  # Only add if not duplicate
+            if task not in tasks_set:
                 tasks_set.add(task)
                 self.pending_tasks.append(task)
 
     def assign_task(self, forklift):
         if not self.pending_tasks and not self.active_tasks:
             return None
-            
+
         if forklift.pos in self.model.FORKLIFT_POSITIONS:
-            if self.pending_tasks:
-                task = self.pending_tasks.pop(0)
-                task.assigned_forklift = forklift
-                self.active_tasks.append(task)
-                return task
+            viable_task = None
+            for task in self.pending_tasks:
+                if task.task_type == TaskType.RETRIEVE:
+                    rack_agent = self.model.get_agent_at_position(task.source_pos)
+                    if isinstance(rack_agent, RackAgent) and rack_agent.has_pallet:
+                        viable_task = task
+                        break
+                elif task.task_type == TaskType.STORE:
+                    rack_agent = self.model.get_agent_at_position(task.dest_pos)
+                    if isinstance(rack_agent, RackAgent) and not rack_agent.has_pallet:
+                        viable_task = task
+                        break
+
+            if viable_task:
+                self.pending_tasks.remove(viable_task)
+                viable_task.assigned_forklift = forklift
+                self.active_tasks.append(viable_task)
+                return viable_task
+            else:
+                print("No hay tareas viables disponibles para asignar.")
+                return None
         return None
 
     def complete_task(self, task):
@@ -146,7 +173,6 @@ class PathFinder:
     def heuristic(a: Tuple[int, int], b: Tuple[int, int]) -> float:
         return abs(b[0] - a[0]) + abs(b[1] - a[1])
 
-   
     @staticmethod
     def is_valid_position(pos: Tuple[int, int], grid, height, width) -> bool:
         if not (0 <= pos[0] < width and 0 <= pos[1] < height):
@@ -155,20 +181,9 @@ class PathFinder:
         cell_contents = grid.get_cell_list_contents(pos)
         for agent in cell_contents:
             if isinstance(agent, ForkliftAgent):
-                return False
+                return False  # Evitar colisiones con otros montacargas
 
-        for agent in cell_contents:
-            if isinstance(agent, (InputAgent, OutputAgent)):
-                return True
-
-        return True
-
-    @staticmethod
-    def is_adjacent_to_target(pos: Tuple[int, int], target: Tuple[int, int], grid) -> bool:
-        """Verifica si la posición actual es adyacente o igual al objetivo."""
-        dx = abs(pos[0] - target[0])
-        dy = abs(pos[1] - target[1])
-        return dx == 0 and dy == 0  
+        return True  # Permitir moverse sobre celdas con otros agentes
 
     @staticmethod
     def get_neighbors(pos: Tuple[int, int], grid, height, width) -> List[Tuple[int, int]]:
@@ -180,23 +195,6 @@ class PathFinder:
             if PathFinder.is_valid_position(new_pos, grid, height, width):
                 neighbors.append(new_pos)
         return neighbors
-
-    @staticmethod
-    def find_alternative_path(start: Tuple[int, int], goal: Tuple[int, int], 
-                            grid, height, width) -> List[Tuple[int, int]]:
-        """Find path to adjacent position if goal is blocked"""
-        adjacent_positions = PathFinder.get_adjacent_positions(goal, grid, height, width)
-        
-        best_path = []
-        min_dist = float('inf')
-        
-        for adj_pos in adjacent_positions:
-            path = PathFinder.a_star(start, adj_pos, grid, height, width)
-            if path and len(path) < min_dist:
-                best_path = path
-                min_dist = len(path)
-                
-        return best_path
 
     @staticmethod
     def a_star(start: Tuple[int, int], goal: Tuple[int, int], grid, height, width) -> List[Tuple[int, int]]:
@@ -293,7 +291,7 @@ class ForkliftAgent(MovableAgent):
 
         self.battery_level -= 0.5
 
-        if not self.path:
+        if not self.path and self.pos != self.goal:
             print(f"Forklift {self.unique_id} is stuck or has no path. Penalizing.")
             self.reward -= 10
 
@@ -355,13 +353,13 @@ class ForkliftAgent(MovableAgent):
                     self.model.grid.width
                 )
 
-        if self.current_task or self.task_state == "RETURNING_HOME":
+        if self.current_task or self.task_state == "RETURNING_HOME" or self.task_state == "CHARGING":
             self._execute_current_task()
             if self.path:  
                 super().step()
 
     def _execute_current_task(self):
-        if not self.current_task:
+        if not self.current_task and self.task_state not in ["RETURNING_HOME", "CHARGING"]:
             print(f"Forklift {self.unique_id} has no current task to execute.")
             return
 
@@ -369,6 +367,10 @@ class ForkliftAgent(MovableAgent):
             if self.task_state == "MOVING_TO_SOURCE":
                 self.goal = self.current_task.source_pos
             elif self.task_state == "MOVING_TO_DEST":
+                self.goal = self.current_task.dest_pos
+            elif self.task_state == "RETURNING_HOME":
+                self.goal = self.starting_position
+            elif self.task_state == "CHARGING":
                 self.goal = self.current_task.dest_pos
 
             self.path = self.pathfinder.a_star(
@@ -381,30 +383,41 @@ class ForkliftAgent(MovableAgent):
             print(f"Forklift {self.unique_id} recalculated path: {self.path}")
 
         if self.path:
-            if self.pathfinder.is_adjacent_to_target(self.pos, self.current_task.source_pos, self.model.grid) and self.task_state == "MOVING_TO_SOURCE":
-                print(f"Forklift {self.unique_id} reached source position {self.current_task.source_pos}")
-                success = self._handle_loading()
-                if success:
-                    self.task_state = "MOVING_TO_DEST"
-                    self.goal = self.current_task.dest_pos
-                    self.path = None  
+            if self.pos == self.goal:
+                if self.task_state == "MOVING_TO_SOURCE":
+                    print(f"Forklift {self.unique_id} reached source position {self.current_task.source_pos}")
+                    success = self._handle_loading()
+                    if success:
+                        self.task_state = "MOVING_TO_DEST"
+                        self.goal = self.current_task.dest_pos
+                        self.path = None  
 
-            elif self.pathfinder.is_adjacent_to_target(self.pos, self.current_task.dest_pos, self.model.grid) and self.task_state == "MOVING_TO_DEST":
-                print(f"Forklift {self.unique_id} reached destination position {self.current_task.dest_pos}")
-                success = self._handle_unloading()
-                if success:
-                    print(f"Forklift {self.unique_id} completed task and is returning home.")
+                elif self.task_state == "MOVING_TO_DEST":
+                    print(f"Forklift {self.unique_id} reached destination position {self.current_task.dest_pos}")
+                    success = self._handle_unloading()
+                    if success:
+                        print(f"Forklift {self.unique_id} completed task and is returning home.")
+                        self.task_state = "RETURNING_HOME"
+                        self.model.task_manager.complete_task(self.current_task)
+                        self.current_task = None
+                        self.path = None  
+
+                elif self.task_state == "RETURNING_HOME":
+                    print(f"Forklift {self.unique_id} returned to starting position {self.starting_position}")
+                    self.task_state = "IDLE"
+                    self.goal = None
+                    self.reward += 10  
+
+                elif self.task_state == "CHARGING":
+                    print(f"Forklift {self.unique_id} reached charging station at {self.pos}")
+                    self.battery_level = 100 
+                    self.reward += 20  
                     self.task_state = "RETURNING_HOME"
-                    self.model.task_manager.complete_task(self.current_task)
                     self.current_task = None
-                    self.path = None  
+                    self.path = None
 
     def _handle_loading(self):
         print(f"Forklift {self.unique_id} attempting to load at {self.pos}")
-        if self.pos != self.current_task.source_pos:
-            print(f"Forklift {self.unique_id} is not at the correct source position: {self.current_task.source_pos}")
-            return False
-
         cell_contents = self.model.grid.get_cell_list_contents(self.pos)
         for agent in cell_contents:
             if self.current_task.task_type == TaskType.STORE and isinstance(agent, InputAgent):
@@ -448,8 +461,6 @@ class ForkliftAgent(MovableAgent):
         print(f"Forklift {self.unique_id} failed to unload at {self.pos}")
         self.reward -= 10  
         return False
-
-
 
 class WarehouseModel(Model):
     INPUT_POSITIONS = [(0, 1)]  
@@ -521,11 +532,18 @@ class WarehouseModel(Model):
 
         self.task_manager = TaskManager(self)
 
+    def get_agent_at_position(self, pos):
+        cell_contents = self.grid.get_cell_list_contents(pos)
+        for agent in cell_contents:
+            if isinstance(agent, RackAgent):
+                return agent
+        return None
+
     def step(self):
         print("\n=== Warehouse Step ===")
         self.task_manager.debug_print_status()
 
-       # Check if all tasks are complete and forklifts are idle
+        # Check if all tasks are complete and forklifts are idle
         all_tasks_complete = (
             len(self.task_manager.pending_tasks) == 0 and 
             len(self.task_manager.active_tasks) == 0
@@ -544,17 +562,17 @@ class WarehouseModel(Model):
         self.schedule.step()
 
     DEFAULT_LAYOUT = [
-    'EEEEEEEOOE',  # 1
-    'EEEEEEEEEE',  # 2
-    'ERRERRERRE',  # 3
-    'ERRERRERRE',  # 4
-    'ERRERRERRE',  # 5
-    'EEEEEEEEEE',  # 6
-    'EEEEEEEEEE',  # 7
-    'EEEEEAEAEE',  # 8
-    'IEEEEAEAEE',  # 9
-    'EEEECCEEEE'   # 10
-]
+        'EEEEEEEOOE',  # 1
+        'EEEEEEEEEE',  # 2
+        'ERRERRERRE',  # 3
+        'ERRERRERRE',  # 4
+        'ERRERRERRE',  # 5
+        'EEEEEEEEEE',  # 6
+        'EEEEEEEEEE',  # 7
+        'EEEEEAEAEE',  # 8
+        'IEEEEAEAEE',  # 9
+        'EEEECCEEEE'   # 10
+    ]
 
 def agent_portrayal(agent):
     if isinstance(agent, RackAgent):
@@ -593,7 +611,7 @@ def agent_portrayal(agent):
             "w": 0.8,
             "h": 0.8
         }
-    elif isinstance(agent, MovableAgent):
+    elif isinstance(agent, ForkliftAgent):
         return {
             "Shape": "rect",
             "Color": "red",

@@ -1,0 +1,31 @@
+Datos de la Simulacion
+======================
+
+Total de tareas completadas: 4
+Total de pallets movidos: 4
+
+Detalles de las tareas:
+- Tipo de tarea: STORE
+  Posicion de origen: (2, 2)
+  Posicion de destino: (40, 69)
+  LGV asignado: 4
+  Tiempo completado: 130
+
+- Tipo de tarea: RETRIEVE
+  Posicion de origen: (68, 75)
+  Posicion de destino: (100, 87)
+  LGV asignado: 2
+  Tiempo completado: 159
+
+- Tipo de tarea: STORE
+  Posicion de origen: (2, 2)
+  Posicion de destino: (103, 38)
+  LGV asignado: 1
+  Tiempo completado: 160
+
+- Tipo de tarea: RETRIEVE
+  Posicion de origen: (19, 73)
+  Posicion de destino: (100, 87)
+  LGV asignado: 3
+  Tiempo completado: 167
+
