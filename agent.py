@@ -441,8 +441,6 @@ class ForkliftAgent(MovableAgent):
     def save_path_to_json(self):
         """Save movement sequence to JSON"""
         filename = f'forklift_paths.json'
-        
-        # Try to load existing data
         try:
             with open(filename, 'r') as f:
                 data = json.load(f)
@@ -451,10 +449,8 @@ class ForkliftAgent(MovableAgent):
         except (FileNotFoundError, json.JSONDecodeError):
             data = []
 
-        # Convert movement sequence to array of position pairs
         positions = [[pos['x'], pos['y']] for pos in self.movement_sequence]
         
-        # Find if agent already exists in data
         agent_found = False
         for agent in data:
             if agent['id'] == self.unique_id:
@@ -462,19 +458,18 @@ class ForkliftAgent(MovableAgent):
                 agent_found = True
                 break
         
-        # Add new agent if not found
         if not agent_found:
             data.append({
                 'id': self.unique_id,
                 'positions': positions
             })
 
-        # Sort by ID
         data.sort(key=lambda x: x['id'])
 
-        # Save with compact formatting
+        formatted_json = '[\n' + ',\n'.join(json.dumps(agent) for agent in data) + '\n]'
+    
         with open(filename, 'w') as f:
-            json.dump(data, f, separators=(',', ':'))
+            f.write(formatted_json)
 
     def _handle_loading(self):
         print(f"Forklift {self.unique_id} attempting to load at {self.pos}")
@@ -625,6 +620,14 @@ class WarehouseModel(Model):
 
         if all_tasks_complete and all_forklifts_idle:
             print("\n=== All tasks completed. Simulation finished ===")
+            for forklift in self.forklift_agents:
+                forklift.save_path_to_json()   
+            with open('forklift_paths.json', 'r') as f:
+                final_paths = json.load(f)
+                for i, path in enumerate(final_paths):
+                    if i > 0:
+                        print()
+                    print(json.dumps([path], separators=(',', ':')), end='')
             self.write_data_to_file()
             self.running = False
             return

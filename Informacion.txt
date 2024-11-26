@@ -7,25 +7,25 @@ Total de pallets movidos: 4
 Detalles de las tareas:
 - Tipo de tarea: STORE
   Posicion de origen: (2, 2)
-  Posicion de destino: (94, 30)
-  LGV asignado: 1
-  Tiempo completado: 144
+  Posicion de destino: (45, 38)
+  LGV asignado: 4
+  Tiempo completado: 106
 
 - Tipo de tarea: STORE
   Posicion de origen: (2, 2)
-  Posicion de destino: (87, 41)
+  Posicion de destino: (73, 63)
   LGV asignado: 3
-  Tiempo completado: 145
+  Tiempo completado: 153
 
 - Tipo de tarea: RETRIEVE
-  Posicion de origen: (96, 33)
+  Posicion de origen: (101, 51)
   Posicion de destino: (100, 87)
-  LGV asignado: 4
-  Tiempo completado: 161
+  LGV asignado: 1
+  Tiempo completado: 164
 
 - Tipo de tarea: RETRIEVE
-  Posicion de origen: (94, 24)
+  Posicion de origen: (103, 19)
   Posicion de destino: (100, 87)
   LGV asignado: 2
-  Tiempo completado: 163
+  Tiempo completado: 179
 
