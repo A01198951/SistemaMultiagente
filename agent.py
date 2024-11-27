@@ -1,3 +1,6 @@
+# Simulacion Python
+# Equipo 6
+
 from mesa import Agent, Model
 from mesa.space import MultiGrid
 from mesa.time import RandomActivation
@@ -10,6 +13,7 @@ import random
 from enum import Enum
 from typing import Tuple, Optional
 import json
+import matplotlib.pyplot as plt
 
 class TaskType(Enum):
     STORE = "STORE"         
@@ -26,6 +30,7 @@ class Task:
         self.completed = False
         self.assigned_time = None  
         self.completed_time = None  
+        self.created_time = None
 
     def __eq__(self, other):
         if not isinstance(other, Task):
@@ -73,7 +78,7 @@ class TaskManager:
         racks_with_pallets = [agent.pos for agent in self.model.rack_agents if agent.has_pallet]
         empty_racks = [agent.pos for agent in self.model.rack_agents if not agent.has_pallet]
 
-        total_tasks = 4
+        total_tasks = 50
         tasks_set = set()
 
         for i in range(total_tasks):
@@ -95,6 +100,7 @@ class TaskManager:
                 racks_with_pallets.remove(source_pos)
 
             if task not in tasks_set:
+                task.created_time = self.model.total_simulation_time
                 tasks_set.add(task)
                 self.pending_tasks.append(task)
 
@@ -294,6 +300,7 @@ class ForkliftAgent(MovableAgent):
         self.battery_level = 100 
         self.reward = 0  
         self.movement_sequence = []
+        self.time_on_task = 0  
 
     def step(self):
         print(f"\n=== Forklift {self.unique_id} Status ===")
@@ -311,7 +318,7 @@ class ForkliftAgent(MovableAgent):
             })
             self.save_path_to_json()
 
-        self.battery_level -= 0
+        self.battery_level -= 0.1
 
         if not self.path and self.pos != self.goal:
             print(f"Forklift {self.unique_id} is stuck or has no path. Penalizing.")
@@ -343,6 +350,7 @@ class ForkliftAgent(MovableAgent):
                 self.current_task = None
 
         if self.task_state == "IDLE":
+            self.time_on_task += self.model.step_duration_seconds
             self.current_task = self.model.task_manager.assign_task(self)
             if self.current_task:
                 print(f"Got new task: {self.current_task}")
@@ -479,6 +487,8 @@ class ForkliftAgent(MovableAgent):
                 self.carrying_pallet = True
                 print(f"Forklift {self.unique_id} picked up a pallet from InputAgent at {self.pos}")
                 self.reward += 15  
+                at_time = self.model.total_simulation_time - self.current_task.created_time
+                self.model.total_accumulation_time += at_time  
                 return True
             elif self.current_task.task_type == TaskType.RETRIEVE and isinstance(agent, RackAgent):
                 if agent.has_pallet:
@@ -545,6 +555,22 @@ class WarehouseModel(Model):
         self.rack_agents = []
         self.forklift_agents = []
         self.charge_stations = []
+        self.step_duration_seconds = 2
+        self.total_steps = 0
+        self.lgv_mission_times = []
+        self.pallets_moved = 0
+        self.pallet_stationary_time = {}
+        self.total_accumulation_time = 0  
+        self.total_simulation_time = 0
+        self.time_data_upf = []
+        self.upf_data = []
+        self.next_upf_collection_time = 200
+
+        self.time_data_pallets = []
+        self.pallets_delivered_over_time = []
+
+        self.time_data_accumulation = []
+        self.accumulation_time_over_time = []
 
         forklift_id_counter = 1  
 
@@ -599,10 +625,77 @@ class WarehouseModel(Model):
                 f.write(f"  Posicion de destino: {task.dest_pos}\n")
                 f.write(f"  LGV asignado: {task.assigned_forklift.unique_id}\n")
                 f.write(f"  Tiempo completado: {task.completed_time}\n\n")
+            
+            total_time_on_tasks = sum(forklift.time_on_task for forklift in self.forklift_agents)
+            average_time_percentage = (total_time_on_tasks / (self.total_simulation_time * len(self.forklift_agents))) * 100
+
+            pallets_retrieved = sum(1 for task in self.completed_tasks if task.task_type == TaskType.RETRIEVE)
+
+            n = len(self.forklift_agents)
+            
+            T = self.total_simulation_time
+            if T > 0 and n > 0:
+                upf = (100 / (n * T)) * total_time_on_tasks
+            else:
+                upf = 0
+
+            f.write(f"Tiempo total de simulacion: {self.total_simulation_time} segundos\n")
+            f.write(f"Tiempo total en misiones: {total_time_on_tasks} segundos\n")
+            f.write(f"Utilizacion del Porcentaje de la Flota (UPF): {upf:.2f}%\n")
+            f.write(f"Cantidad de pallets entregados: {pallets_retrieved}\n")
+            f.write(f"Tiempo de acumulacion de pallets: {self.total_accumulation_time} segundos\n")
+
+    def generate_plots(self):
+        plt.figure()
+        plt.plot(self.time_data_upf, self.upf_data, marker='o')
+        plt.title('Utilización del Porcentaje de la Flota (UPF)')
+        plt.xlabel('Tiempo (segundos)')
+        plt.ylabel('UPF (%)')
+        plt.grid(True)
+        plt.savefig('upf_plot.png')
+        plt.close()
+
+        plt.figure()
+        plt.plot(self.time_data_pallets, self.pallets_delivered_over_time)
+        plt.title('Cantidad de pallets entregados')
+        plt.xlabel('Tiempo (segundos)')
+        plt.ylabel('Cantidad de pallets entregados')
+        plt.grid(True)
+        plt.savefig('pallets_delivered_plot.png')
+        plt.close()
+
+        plt.figure()
+        plt.plot(self.time_data_accumulation, self.accumulation_time_over_time)
+        plt.title('Tiempo de acumulación de pallets')
+        plt.xlabel('Tiempo (segundos)')
+        plt.ylabel('Tiempo de acumulación (segundos)')
+        plt.grid(True)
+        plt.savefig('accumulation_time_plot.png')
+        plt.close()
+
 
     def step(self):
         print("\n=== Warehouse Step ===")
         self.task_manager.dRBug_print_status()
+        self.total_simulation_time += self.step_duration_seconds
+
+        if self.total_simulation_time >= self.next_upf_collection_time:
+            total_time_on_tasks = sum(forklift.time_on_task for forklift in self.forklift_agents)
+            n = len(self.forklift_agents)
+            T = self.total_simulation_time
+            upf = (100 / (n * T)) * total_time_on_tasks if T > 0 and n > 0 else 0
+
+            self.time_data_upf.append(self.total_simulation_time)
+            self.upf_data.append(upf)
+
+            self.next_upf_collection_time += 200
+
+        pallets_retrieved = sum(1 for task in self.completed_tasks if task.task_type == TaskType.RETRIEVE)
+        self.time_data_pallets.append(self.total_simulation_time)
+        self.pallets_delivered_over_time.append(pallets_retrieved)
+
+        self.time_data_accumulation.append(self.total_simulation_time)
+        self.accumulation_time_over_time.append(self.total_accumulation_time)
 
         all_tasks_complete = (
             len(self.task_manager.pending_tasks) == 0 and 
@@ -629,6 +722,7 @@ class WarehouseModel(Model):
                         print()
                     print(json.dumps([path], separators=(',', ':')), end='')
             self.write_data_to_file()
+            self.generate_plots()
             self.running = False
             return
     
@@ -776,10 +870,10 @@ layout = [
     'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 70
     'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 71
     'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 72
-    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 73
-    'EEEEEEEEEEEEAEEAEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 74
+    'EEEEEEEEAEEEEEEEEEAEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 73
+    'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 74
     'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 75
-    'EEEEEEEEEEEEAEEAEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 76
+    'EEEEEEEEAEEEEEEEEEAEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 76
     'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 77
     'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 78
     'EEEEEEEEEEEEEEEEEEEEEEEEEERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBBBBRERBB' ,  # 79
