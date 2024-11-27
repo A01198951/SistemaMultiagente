@@ -78,7 +78,7 @@ class TaskManager:
         racks_with_pallets = [agent.pos for agent in self.model.rack_agents if agent.has_pallet]
         empty_racks = [agent.pos for agent in self.model.rack_agents if not agent.has_pallet]
 
-        total_tasks = 50
+        total_tasks = 10
         tasks_set = set()
 
         for i in range(total_tasks):
@@ -318,7 +318,7 @@ class ForkliftAgent(MovableAgent):
             })
             self.save_path_to_json()
 
-        self.battery_level -= 0.1
+        self.battery_level -= 0.3
 
         if not self.path and self.pos != self.goal:
             print(f"Forklift {self.unique_id} is stuck or has no path. Penalizing.")

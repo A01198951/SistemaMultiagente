@@ -1,312 +1,36 @@
 Datos de la Simulacion
 ======================
 
-Total de tareas completadas: 50
-Total de pallets movidos: 50
+Total de tareas completadas: 4
+Total de pallets movidos: 4
 
 Detalles de las tareas:
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (94, 24)
-  LGV asignado: 3
-  Tiempo completado: 131
-
 - Tipo de tarea: RETRIEVE
-  Posicion de origen: (45, 67)
+  Posicion de origen: (38, 49)
   Posicion de destino: (100, 87)
   LGV asignado: 4
   Tiempo completado: 158
 
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (96, 9)
-  Posicion de destino: (100, 87)
-  LGV asignado: 2
-  Tiempo completado: 177
-
 - Tipo de tarea: STORE
   Posicion de origen: (2, 2)
-  Posicion de destino: (110, 52)
-  LGV asignado: 1
-  Tiempo completado: 178
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (101, 12)
+  Posicion de destino: (108, 38)
   LGV asignado: 3
-  Tiempo completado: 361
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (66, 35)
-  LGV asignado: 1
-  Tiempo completado: 437
+  Tiempo completado: 159
 
 - Tipo de tarea: RETRIEVE
-  Posicion de origen: (17, 57)
-  Posicion de destino: (100, 87)
-  LGV asignado: 4
-  Tiempo completado: 477
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (17, 59)
+  Posicion de origen: (103, 24)
   Posicion de destino: (100, 87)
   LGV asignado: 2
-  Tiempo completado: 492
+  Tiempo completado: 165
 
 - Tipo de tarea: STORE
   Posicion de origen: (2, 2)
-  Posicion de destino: (75, 79)
-  LGV asignado: 3
-  Tiempo completado: 639
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (87, 82)
-  Posicion de destino: (100, 87)
+  Posicion de destino: (80, 78)
   LGV asignado: 1
-  Tiempo completado: 733
+  Tiempo completado: 174
 
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (82, 72)
-  LGV asignado: 4
-  Tiempo completado: 839
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (87, 13)
-  Posicion de destino: (100, 87)
-  LGV asignado: 2
-  Tiempo completado: 856
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (96, 13)
-  LGV asignado: 3
-  Tiempo completado: 941
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (40, 40)
-  Posicion de destino: (100, 87)
-  LGV asignado: 1
-  Tiempo completado: 1066
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (54, 52)
-  LGV asignado: 4
-  Tiempo completado: 1094
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (10, 62)
-  LGV asignado: 3
-  Tiempo completado: 1134
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (12, 36)
-  Posicion de destino: (100, 87)
-  LGV asignado: 2
-  Tiempo completado: 1180
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (26, 21)
-  LGV asignado: 4
-  Tiempo completado: 1265
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (31, 79)
-  Posicion de destino: (100, 87)
-  LGV asignado: 3
-  Tiempo completado: 1358
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (82, 5)
-  LGV asignado: 1
-  Tiempo completado: 1389
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (82, 22)
-  Posicion de destino: (100, 87)
-  LGV asignado: 4
-  Tiempo completado: 1450
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (101, 45)
-  Posicion de destino: (100, 87)
-  LGV asignado: 2
-  Tiempo completado: 1526
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (87, 77)
-  LGV asignado: 1
-  Tiempo completado: 1657
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (45, 8)
-  LGV asignado: 4
-  Tiempo completado: 1686
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (82, 16)
-  Posicion de destino: (100, 87)
-  LGV asignado: 3
-  Tiempo completado: 1756
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (59, 37)
-  Posicion de destino: (100, 87)
-  LGV asignado: 2
-  Tiempo completado: 1839
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (61, 33)
-  LGV asignado: 4
-  Tiempo completado: 1867
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (108, 66)
-  Posicion de destino: (100, 87)
-  LGV asignado: 1
-  Tiempo completado: 2030
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (80, 73)
-  LGV asignado: 3
-  Tiempo completado: 2097
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (12, 37)
-  Posicion de destino: (100, 87)
-  LGV asignado: 4
-  Tiempo completado: 2103
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (40, 62)
-  LGV asignado: 2
-  Tiempo completado: 2152
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (73, 15)
-  LGV asignado: 2
-  Tiempo completado: 2337
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (45, 63)
-  Posicion de destino: (100, 87)
-  LGV asignado: 1
-  Tiempo completado: 2364
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (61, 72)
-  Posicion de destino: (100, 87)
-  LGV asignado: 3
-  Tiempo completado: 2443
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (108, 63)
-  LGV asignado: 4
-  Tiempo completado: 2479
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (45, 71)
-  Posicion de destino: (100, 87)
-  LGV asignado: 2
-  Tiempo completado: 2571
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (59, 10)
-  LGV asignado: 1
-  Tiempo completado: 2664
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (5, 69)
-  Posicion de destino: (100, 87)
-  LGV asignado: 3
-  Tiempo completado: 2789
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (110, 62)
-  LGV asignado: 4
-  Tiempo completado: 2817
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (24, 62)
-  Posicion de destino: (100, 87)
-  LGV asignado: 1
-  Tiempo completado: 2899
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (61, 65)
-  LGV asignado: 2
-  Tiempo completado: 2911
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (54, 59)
-  LGV asignado: 3
-  Tiempo completado: 3127
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (17, 70)
-  Posicion de destino: (100, 87)
-  LGV asignado: 4
-  Tiempo completado: 3144
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (110, 36)
-  Posicion de destino: (100, 87)
-  LGV asignado: 2
-  Tiempo completado: 3181
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (38, 75)
-  LGV asignado: 1
-  Tiempo completado: 3245
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (24, 37)
-  LGV asignado: 4
-  Tiempo completado: 3387
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (5, 73)
-  Posicion de destino: (100, 87)
-  LGV asignado: 3
-  Tiempo completado: 3396
-
-- Tipo de tarea: STORE
-  Posicion de origen: (2, 2)
-  Posicion de destino: (75, 20)
-  LGV asignado: 2
-  Tiempo completado: 3488
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (75, 41)
-  Posicion de destino: (100, 87)
-  LGV asignado: 1
-  Tiempo completado: 3502
-
-- Tipo de tarea: RETRIEVE
-  Posicion de origen: (5, 80)
-  Posicion de destino: (100, 87)
-  LGV asignado: 4
-  Tiempo completado: 3605
-
-Tiempo total de simulacion: 7530 segundos
-Tiempo total en misiones: 900 segundos
-Utilizacion del Porcentaje de la Flota (UPF): 2.99%
-Cantidad de pallets entregados: 25
-Tiempo de acumulacion de pallets: 83244 segundos
+Tiempo total de simulacion: 648 segundos
+Tiempo total en misiones: 114 segundos
+Utilizacion del Porcentaje de la Flota (UPF): 4.40%
+Cantidad de pallets entregados: 2
+Tiempo de acumulacion de pallets: 74 segundos
